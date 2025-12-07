@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 
-from core.nn.attn import GroupedQueryAttention
+from core.nn.grouped_query_attn import GroupedQueryAttention
 from core.nn.ffn import FeedForwardSwiGLU
 from core.norm.rms_norm import RMSNorm
 from core.utils.params import ParamsLLama3
