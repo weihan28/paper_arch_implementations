@@ -89,7 +89,7 @@ if __name__ == '__main__':
 
     dummy_input = torch.randn(2, 8, params.dim).to(device)  # (B, T, h)
     dummy_start_pos = 0
-    dummy_freqs_cis = torch.randn(8, 64).to(device)
+    dummy_freqs_cis = torch.randn(8, 64).to(device) # (T, dim_head / 2)
     dummy_mask = torch.rand(8, 8).to(device)  # mask is size (T, T)
 
     attn = GroupedQueryAttention(params).to(device=device)
