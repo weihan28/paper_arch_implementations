@@ -38,12 +38,12 @@ def apply_rotary_emb_mla(x: torch.Tensor, freqs_cis: torch.Tensor) -> torch.Tens
 
 
 def precompute_freqs_cis_mla(args) -> torch.Tensor:
-    dim = args.qk_rope_head_dim
-    seqlen = args.max_seq_len
-    beta_fast = args.beta_fast
-    beta_slow = args.beta_slow
-    base = args.rope_theta
-    factor = args.rope_factor
+    dim = args.attn.decoupled_dim
+    seqlen = args.max_seq_length
+    beta_fast = args.rope.beta_fast
+    beta_slow = args.rope.beta_slow
+    base = args.rope.rope_theta
+    factor = args.rope.rope_factor
 
     def find_correction_dim(num_rotations, dim, base, max_seq_len):
         return dim * math.log(max_seq_len / (num_rotations * 2 * math.pi)) / (2 * math.log(base))
@@ -61,8 +61,8 @@ def precompute_freqs_cis_mla(args) -> torch.Tensor:
         return ramp_func
 
     freqs = 1.0 / (base ** (torch.arange(0, dim, 2, dtype=torch.float32) / dim))
-    if seqlen > args.original_seq_len:
-        low, high = find_correction_range(beta_fast, beta_slow, dim, base, args.original_seq_len)
+    if seqlen > args.rope.original_seq_len:
+        low, high = find_correction_range(beta_fast, beta_slow, dim, base, args.rope.original_seq_len)
         smooth = 1 - linear_ramp_factor(low, high, dim // 2)
         freqs = freqs / factor * (1 - smooth) + freqs * smooth
 

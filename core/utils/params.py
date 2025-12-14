@@ -56,6 +56,28 @@ class MLA(Attn):
     decoupled_dim = 4
 
 
+@dataclass
+class FFN:
+    ffn_dim: int = 4096
+
+
+@dataclass
+class Moe(FFN):
+    n_groups = 4
+    n_limited_groups = 2
+    n_routed_experts = 16
+    n_shared_experts = 2
+    inter_dim: Optional[int] = None
+    k = 2
+    route_scale = 1
+    score_func = "softmax"
+    use_bias = True
+
+    def __post_init__(self):
+        if self.inter_dim is None:
+            self.inter_dim = self.ffn_dim // 2
+
+
 # ROPE positional embedding
 @dataclass
 class Rope:
@@ -73,3 +95,10 @@ class ParamsLlama3(Transformer):
     multiple_of: int = 1024
     attn: GQA = field(default_factory=GQA)
     rope: Rope = field(default_factory=Rope)
+
+
+@dataclass
+class DeepSeekV2(Transformer):
+    attn: MLA = field(default_factory=MLA)
+    rope: Rope = field(default_factory=Rope)
+    moe: Moe = field(default_factory=Moe)

@@ -1,42 +1,7 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
-
-from dataclasses import dataclass, asdict
-
-
-@dataclass
-class MockParams:
-    dim = 4096
-    ffn_dim_multiplier = 1.3
-    multiple_of = 1024
-    n_heads = 32
-    n_kv_heads = 8
-    n_layers = 32
-    norm_eps = 1e-05
-    rope_theta = 500000.0
-    use_scaled_rope = True
-    vocab_size = 128256
-    max_batch_size = 4
-    max_seq_length = 128
-    n_kv_head_rep = 4
-    ffn_dim = 4 * 4096
-    device = torch.device('mps')
-
-    # to add
-    n_groups = 4
-    n_routed_experts = 16
-    n_shared_experts = 2
-    moe_inter_dim = ffn_dim // 2
-    moe_top_k = 2
-    moe_route_scale = 1
-    moe_score_func = "softmax"
-    n_limited_groups = 2
-    moe_use_bias = True
-
-
-def to_dict(self):
-    return asdict(self)
+from core.utils.params import DeepSeekV2
 
 
 class Expert(nn.Module):
@@ -52,22 +17,25 @@ class Expert(nn.Module):
 
 
 class Router(nn.Module):
-    def __init__(self, params: MockParams):
+    # routes each token to their top k experts.
+
+    def __init__(self, params: DeepSeekV2):
         super().__init__()
-        self.params = params
-        self.n_groups = params.n_groups
-        self.n_limited_groups = params.n_limited_groups  # only choose from n_limited_groups group by score
-        self.k = params.moe_top_k
+        self.dim = params.dim
+        self.n_groups = params.moe.n_groups
+        self.n_limited_groups = params.moe.n_limited_groups
+        self.k = params.moe.k
+        self.score_func = params.moe.score_func
+        self.n_routed_experts = params.moe.n_routed_experts
+        self.use_bias = params.moe.use_bias
+        self.route_scale = params.moe.route_scale
 
-        self.score_func = params.moe_score_func
-
-        self.w1 = nn.Linear(params.dim, params.n_routed_experts)
-        self.bias = nn.Parameter(torch.empty(params.n_routed_experts)) if params.moe_use_bias else None
-        self.route_scale = params.moe_route_scale
+        self.w1 = nn.Linear(self.dim, self.n_routed_experts)
+        self.bias = nn.Parameter(torch.empty(self.n_routed_experts)) if self.use_bias else None
+        self.route_scale = self.route_scale
 
     def forward(self, x):
         _, _ = x.shape  # [B*T, h]
-        # routes each token to their top k experts.
         scores = self.w1(x)  # [B*T, N]
 
         # generate scores
@@ -114,12 +82,12 @@ class Router(nn.Module):
 
 
 class Moe(nn.Module):
-    def __init__(self, params: MockParams):
+    def __init__(self, params: DeepSeekV2):
         super().__init__()
         self.dim = params.dim
-        self.inter_dim = params.moe_inter_dim
-        self.n_routed_experts = params.n_routed_experts
-        self.n_shared_experts = params.n_shared_experts
+        self.inter_dim = params.moe.inter_dim
+        self.n_routed_experts = params.moe.n_routed_experts
+        self.n_shared_experts = params.moe.n_shared_experts
 
         # experts
         self.routed_experts = nn.ModuleList(Expert(self.dim, self.inter_dim) for _ in range(self.n_routed_experts))
@@ -151,7 +119,10 @@ class Moe(nn.Module):
 
 
 if __name__ == '__main__':
-    params = MockParams()
+    from core.utils.device import get_device
+
+    device = get_device()
+    params = DeepSeekV2(device=device)
     B, T, h = 2, 8, params.dim
     x = torch.randn(B, T, h).to(params.device)
 
