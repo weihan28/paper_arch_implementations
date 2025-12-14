@@ -27,6 +27,7 @@ def apply_rotary_emb(xq, xk, freqs_cis):
     xk_out = torch.view_as_real(xk_ * freqs_cis).flatten(3)
     return xq_out.type_as(xq), xk_out.type_as(xk)
 
+
 # modified version for MLA
 def apply_rotary_emb_mla(x: torch.Tensor, freqs_cis: torch.Tensor) -> torch.Tensor:
     dtype = x.dtype
@@ -34,6 +35,7 @@ def apply_rotary_emb_mla(x: torch.Tensor, freqs_cis: torch.Tensor) -> torch.Tens
     freqs_cis = freqs_cis.view(1, x.size(1), 1, x.size(-1))
     y = torch.view_as_real(x * freqs_cis).flatten(3)
     return y.to(dtype)
+
 
 def precompute_freqs_cis_mla(args) -> torch.Tensor:
     dim = args.qk_rope_head_dim

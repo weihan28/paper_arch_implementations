@@ -142,11 +142,12 @@ class Moe(nn.Module):
                 pass
             expert = self.routed_experts[i]
             token_idx, col = torch.where(indices == i)  # row , col
-            y[token_idx] += expert(x[token_idx]) * scores[token_idx, col].unsqueeze(-1)  # [len(idx), h] * [len(idx), 1], weight output with scores
+            y[token_idx] += expert(x[token_idx]) * scores[token_idx, col].unsqueeze(
+                -1)  # [len(idx), h] * [len(idx), 1], weight output with scores
 
         # run shared experts
         z = self.shared_experts(x)  # [B*T, h]
-        return (y + z).view(shape) # [B, T, h]
+        return (y + z).view(shape)  # [B, T, h]
 
 
 if __name__ == '__main__':

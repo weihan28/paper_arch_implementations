@@ -3,6 +3,7 @@ from torch import nn
 from torch.nn import functional as F
 from core.pos_embed.rotary_embed import apply_rotary_emb_mla
 
+
 class MultiHeadLatentAttention(nn.Module):
 
     def __init__(self, params):
@@ -16,8 +17,8 @@ class MultiHeadLatentAttention(nn.Module):
 
         # KV low rank compression matrices
         self.W_dkv = nn.Linear(params.dim, params.kv_compress_dim, bias=False)
-        self.W_uk = nn.Linear(params.q_compress_dim, params.n_heads * params.dim_head, bias=False)
-        self.W_uv = nn.Linear(params.q_compress_dim, params.n_heads * params.dim_head, bias=False)
+        self.W_uk = nn.Linear(params.kv_compress_dim, params.n_heads * params.dim_head, bias=False)
+        self.W_uv = nn.Linear(params.kv_compress_dim, params.n_heads * params.dim_head, bias=False)
         self.norm_kv = nn.RMSNorm(params.kv_compress_dim, eps=params.norm_eps)
 
         # Decoupled rope matrices
@@ -35,7 +36,7 @@ class MultiHeadLatentAttention(nn.Module):
                 params.max_seq_length,
                 params.kv_compress_dim,
             ),
-            persistent=False # This buffer will NOT be saved into state_dict() checkpoints.
+            persistent=False  # This buffer will NOT be saved into state_dict() checkpoints.
         )
 
         # decoupled key cache
@@ -44,18 +45,18 @@ class MultiHeadLatentAttention(nn.Module):
             torch.zeros(
                 params.max_batch_size,
                 params.max_seq_length,
-                1, # This is due to my un-optimal implementation
+                1,  # This is due to my un-optimal implementation
                 params.decoupled_dim,
             ),
-            persistent = False
+            persistent=False
         )
 
     def forward(self, x: torch.Tensor, start_pos, freqs_cis, mask):
         B, t, _ = x.shape
 
         # get compressed latent vectors for query & kv
-        q_compressed = self.W_dq(x) # [B, t, q_compress_dim]
-        kv_compressed = self.W_dkv(x) # [B, t, kv_compress_dim]
+        q_compressed = self.W_dq(x)  # [B, t, q_compress_dim]
+        kv_compressed = self.W_dkv(x)  # [B, t, kv_compress_dim]
 
         # normalization after compressed latent vectors
         kv_compressed = self.norm_kv(kv_compressed)
@@ -77,8 +78,8 @@ class MultiHeadLatentAttention(nn.Module):
             self.cache_k_rope[:B, start_pos: start_pos + t] = k_rope
 
             # retrieve cache
-            kv_compressed = self.cache_kv_compressed[:B, : start_pos + t] # [B, T, 1, decoupled_dim], where T>=t
-            k_rope = self.cache_k_rope[:B, : start_pos + t] # [B, T, 1, decoupled_dim]
+            kv_compressed = self.cache_kv_compressed[:B, : start_pos + t]  # [B, T, 1, decoupled_dim], where T>=t
+            k_rope = self.cache_k_rope[:B, : start_pos + t]  # [B, T, 1, decoupled_dim]
             print(f"Current kv_compressed shape: {kv_compressed.shape}")
             print(f"Current k_rope_shape: {k_rope.shape}")
 
@@ -86,23 +87,27 @@ class MultiHeadLatentAttention(nn.Module):
         k_rope = k_rope.expand(-1, -1, self.params.n_heads, -1)  # [B, T, n_head, decoupled_dim]
 
         # generate q, k, v from latent vectors
-        q = self.W_uq(q_compressed).view(*q_compressed.shape[:2], self.params.n_heads, self.params.dim_head)  # [B, t, n_heads, dim_head]
-        k = self.W_uk(kv_compressed).view(*kv_compressed.shape[:2], self.params.n_heads, self.params.dim_head)  # [B, T, n_heads, dim_head]
-        v = self.W_uv(kv_compressed).view(*kv_compressed.shape[:2], self.params.n_heads, self.params.dim_head)  # [B, T, n_heads, dim_head]
+        q = self.W_uq(q_compressed).view(*q_compressed.shape[:2], self.params.n_heads,
+                                         self.params.dim_head)  # [B, t, n_heads, dim_head]
+        k = self.W_uk(kv_compressed).view(*kv_compressed.shape[:2], self.params.n_heads,
+                                          self.params.dim_head)  # [B, T, n_heads, dim_head]
+        v = self.W_uv(kv_compressed).view(*kv_compressed.shape[:2], self.params.n_heads,
+                                          self.params.dim_head)  # [B, T, n_heads, dim_head]
 
         # concatenate decoupled rotational embeds
         q = torch.cat((q, q_rope), dim=-1)  # [B, T, n_heads, dim_head + decoupled_dim]
-        k = torch.cat((k, k_rope), dim=-1) # [B, T, n_heads, dim_head + decoupled_dim]
+        k = torch.cat((k, k_rope), dim=-1)  # [B, T, n_heads, dim_head + decoupled_dim]
 
         # attention
-        q = q.transpose(1, 2) # [B, n_heads, T, dim_head + decoupled_dim]
-        k = k.transpose(1, 2) # [B, n_heads, T, dim_head + decoupled_dim]
-        v = v.transpose(1, 2) # [B, n_heads, T, dim_head]
+        q = q.transpose(1, 2)  # [B, n_heads, T, dim_head + decoupled_dim]
+        k = k.transpose(1, 2)  # [B, n_heads, T, dim_head + decoupled_dim]
+        v = v.transpose(1, 2)  # [B, n_heads, T, dim_head]
         out = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)  # (B, n_heads, T, dim_head)
 
         # project out
-        out = out.transpose(1, 2).contiguous().view(*x.shape[:2], self.params.n_heads * self.params.dim_head) # (B, T, n_heads * dim_head)
-        return self.W_o(out) # (B, T, dim)
+        out = out.transpose(1, 2).contiguous().view(*x.shape[:2],
+                                                    self.params.n_heads * self.params.dim_head)  # (B, T, n_heads * dim_head)
+        return self.W_o(out)  # (B, T, dim)
 
 
 if __name__ == '__main__':
@@ -121,7 +126,7 @@ if __name__ == '__main__':
     # mla
     params.q_lora_rank = 0
     params.kv_lora_rank = params.kv_compress_dim
-    params.qk_nope_head_dim =  params.q_compress_dim
+    params.qk_nope_head_dim = params.q_compress_dim
     params.qk_rope_head_dim = params.decoupled_dim
     params.v_head_dim = params.dim_head
     # rope
@@ -135,7 +140,7 @@ if __name__ == '__main__':
     print(params)
 
     mla = MultiHeadLatentAttention(params).to(device)
-    mla.eval() # inference mode
+    mla.eval()  # inference mode
 
     freqs_cis = precompute_freqs_cis_mla(params).to(device)
     print("Precomputed freqs_cis shape:", freqs_cis.shape)
@@ -150,7 +155,7 @@ if __name__ == '__main__':
 
     print("\nProcess Initial Input of shape: ", dummy_input.shape)
     print("Fetched freqs_cis shape:", dummy_freqs_cis.shape)
-    out = mla.forward(dummy_input, dummy_start_pos,  dummy_freqs_cis, dummy_mask)
+    out = mla.forward(dummy_input, dummy_start_pos, dummy_freqs_cis, dummy_mask)
     print("Output shape: ", out.shape)
     dummy_start_pos += T
 
@@ -160,14 +165,5 @@ if __name__ == '__main__':
     dummy_freqs_cis = freqs_cis[dummy_start_pos: dummy_start_pos + T]
     print("\nProcess next token of shape: ", dummy_next_input.shape)
     print("fetched freqs_cis shape:", dummy_freqs_cis.shape)
-    out = mla.forward(dummy_next_input, dummy_start_pos, dummy_freqs_cis, None) # no mask used when seq length is 1
+    out = mla.forward(dummy_next_input, dummy_start_pos, dummy_freqs_cis, None)  # no mask used when seq length is 1
     print("Output shape: ", out.shape)
-
-
-
-
-
-
-
-
-

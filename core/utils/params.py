@@ -5,58 +5,71 @@ import torch
 
 
 @dataclass
-class ParamsLLama3:
-    dim: int
-    ffn_dim_multiplier: float
-    multiple_of: int
-    n_heads: int
-    n_kv_heads: int
-    n_layers: int
-    norm_eps: float
-    rope_theta: float
-    use_scaled_rope: bool
-    vocab_size: int
-    max_batch_size: int
-    max_seq_length: int
-    n_kv_head_rep: int
-    dim_head: int
-    ffn_dim: Optional[int] = None
+class Common:
+    dim: int = 4096
+    vocab_size = 128256
+    max_batch_size = 4
+    max_seq_length = 128
     device: Optional[torch.device] = None
 
     def __post_init__(self):
         if self.device is None:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             print(f"Warning: using default device ({self.device}) as device was not provided")
+        else:
+            print(f"Current device: {self.device}")
 
     def to_dict(self):
         return asdict(self)
 
 
-def params_llama3(device: torch.device):
-    return ParamsLLama3(
-        dim=4096,
-        ffn_dim_multiplier=1.3,
-        multiple_of=1024,
-        n_heads=32,
-        n_kv_heads=8,
-        n_layers=32,
-        norm_eps=1e-05,
-        rope_theta=500000.0,
-        use_scaled_rope=True,
-        vocab_size=128256,
-        max_batch_size=4,
-        max_seq_length=128,
-        n_kv_head_rep=4,
-        dim_head=128,
-        device=device,
-    )
+# RMS Norm
+@dataclass
+class RMSNorm:
+    norm_eps = 1e-7
 
 
-if __name__ == '__main__':
-    device = torch.device("cpu")
-    p = params_llama3(device)
-    print(p.device)
-    print(p.ffn_dim)
-    p.ffn_dim = 1
-    print(p.ffn_dim)
-    d = p.to_dict()
+@dataclass
+class Transformer(Common):
+    n_layers: int = 4
+    rms_norm: Optional[RMSNorm] = field(default_factory=RMSNorm)
+
+
+# Standard Attention
+@dataclass
+class Attn:
+    n_heads: int = 32
+    head_dim: int = 128
+
+
+# Grouped Query Attention
+@dataclass
+class GQA(Attn):
+    n_kv_heads: int = 8
+
+
+# Multi-head Latent Attention
+@dataclass
+class MLA(Attn):
+    kv_compress_dim = 4
+    q_compress_dim = 4
+    decoupled_dim = 4
+
+
+# ROPE positional embedding
+@dataclass
+class Rope:
+    original_seq_len: int = 4096
+    rope_theta: float = 10000.0
+    rope_factor: float = 40
+    beta_fast: int = 32
+    beta_slow: int = 1
+    mscale: float = 1.
+
+
+@dataclass
+class ParamsLlama3(Transformer):
+    ffn_dim_multiplier: int = 1.3
+    multiple_of: int = 1024
+    attn: GQA = field(default_factory=GQA)
+    rope: Rope = field(default_factory=Rope)

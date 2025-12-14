@@ -17,6 +17,7 @@ https://medium.com/deeplearningmadeeasy/glu-gated-linear-unit-21e71cd52081
 has a gating function that performs element wise multiplication.
 
 learns:
+
 - Which hidden dimensions to amplify
 - Which to suppress
 - Context-dependent feature selection
@@ -38,7 +39,7 @@ class FeedForwardSwiGLU(nn.Module):
         self.proj = nn.Linear(params.ffn_dim, params.dim, bias=False)
 
     def forward(self, x):
-        return self.proj(F.silu(self.w1(x)) * self.w2(x)) # element wise multiplication
+        return self.proj(F.silu(self.w1(x)) * self.w2(x))  # element wise multiplication
 ```
 
 basically GLU but using swish instead of sigmoid.

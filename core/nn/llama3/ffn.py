@@ -1,9 +1,10 @@
 from torch import nn
 from torch.nn import functional as F
+from core.utils.params import ParamsLlama3
 
 
 # https://github.com/meta-llama/llama3/blob/main/llama/model.py#L202
-def _get_ffn_dim(hidden_dim, ffn_dim_multiplier, multiple_of):
+def get_ffn_dim(hidden_dim, ffn_dim_multiplier, multiple_of):
     hidden_dim = int(2 * hidden_dim / 3)
     # custom dim factor multiplier
     if ffn_dim_multiplier is not None:
@@ -13,13 +14,11 @@ def _get_ffn_dim(hidden_dim, ffn_dim_multiplier, multiple_of):
 
 
 class FeedForwardSwiGLU(nn.Module):
-    def __init__(self, params):
-        super(FeedForwardSwiGLU, self).__init__()
-        if params.ffn_dim is None:
-            params.ffn_dim = _get_ffn_dim(4 * params.dim, params.ffn_dim_multiplier, params.multiple_of)
-        self.w1 = nn.Linear(params.dim, params.ffn_dim, bias=False)
-        self.w2 = nn.Linear(params.dim, params.ffn_dim, bias=False)
-        self.proj = nn.Linear(params.ffn_dim, params.dim, bias=False)
+    def __init__(self, dim, inter_dim):
+        super().__init__()
+        self.w1 = nn.Linear(dim, inter_dim, bias=False)
+        self.w2 = nn.Linear(dim, inter_dim, bias=False)
+        self.proj = nn.Linear(inter_dim, dim, bias=False)
 
     def forward(self, x):
         return self.proj(F.silu(self.w1(x)) * self.w2(x))
@@ -27,12 +26,13 @@ class FeedForwardSwiGLU(nn.Module):
 
 if __name__ == "__main__":
     import torch
-    from core.utils.params import params_llama3
+    from core.utils.device import get_device
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = get_device()
 
-    params = params_llama3(device)
+    params = ParamsLlama3(device=device)
     dummy_input = torch.randn(2, 8, params.dim)
-    model = FeedForwardSwiGLU(params)
+    inter_dim = get_ffn_dim(params.dim, params.ffn_dim_multiplier, params.multiple_of)
+    model = FeedForwardSwiGLU(params.dim, inter_dim)
     print(dummy_input.shape)
     print(model(dummy_input).shape)

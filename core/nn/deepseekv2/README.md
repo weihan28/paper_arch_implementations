@@ -1,11 +1,13 @@
 <img src="attachments/mla_2.png" width="500"><br>
 
 papers (v2&v3 use the same architecture):
+
 - deepseekv2: https://arxiv.org/pdf/2405.04434
 - deepseekv3: https://arxiv.org/pdf/2412.19437
 - deepseekMoe: https://arxiv.org/pdf/2401.06066
 
 # Multi-head Latent Attention (MLA)
+
 source(Deepseek v2): https://arxiv.org/pdf/2405.04434
 
 <img src="attachments/mla_1.png" width="500"><br>
@@ -21,17 +23,21 @@ Cache Size:<br>
 <img src="attachments/mla_4.png" width="500"><br>
 
 # Deepseek Mixture Of Experts (MOE):<br>
+
 <img src="attachments/moe_1.png" width="500"><br>
 
 official github: https://github.com/deepseek-ai/DeepSeek-V3/blob/main/inference/model.py#L664
 
 #### Expert:<br>
+
 - each expert is a standard swiGLU FFN.
 
 #### Router:<br>
+
 - maps each token to k routed experts.
 
 softmax or sigmoid is used for the scores:<br>
+
 ```python
  _, _ = x.shape  # [B*T, h]
 scores = self.w1(x)  # [B*T, N]
@@ -45,7 +51,8 @@ else:
 ```
 
 a learnable expert level bias is added:<br>
-- this is not added before the softmax as it is supposed to push (bias) the scores to other experts. 
+
+- this is not added before the softmax as it is supposed to push (bias) the scores to other experts.
 
 ```python
 self.bias = nn.Parameter(torch.empty(params.n_routed_experts)) if params.moe_use_bias else None
@@ -57,7 +64,9 @@ if self.bias is not None:
 ```
 
 if experts are partitioned to groups, top_k_grp groups are chosen and the rest are muted.
+
 - if bias is used, amax cant be used as the bias may push one specific expert to dominate.
+
 ```python
 def _mask_groups(self, scores, x):
     if self.n_groups > 1:
@@ -80,6 +89,7 @@ def _mask_groups(self, scores, x):
 ```
 
 the final top k experts and their scores are chosen.
+
 ```python
 # extract top k scores
 indices = scores.topk(dim=-1, k=self.k).indices  # [B*T, k]
