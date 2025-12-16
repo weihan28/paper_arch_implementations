@@ -1,9 +1,10 @@
 
 Source: https://youtu.be/0VdNflU08yA?si=zTiAwwZ3W1YT-ruG
-Official torchao intro: https://docs.pytorch.org/ao/stable/quantization_overview.html#
+<br>Official torchao intro: https://docs.pytorch.org/ao/stable/quantization_overview.html#
 
 Github:
-qat: https://github.com/pytorch/ao/tree/main/torchao/quantization/qat
+<br>quantization: https://github.com/pytorch/ao/blob/main/torchao/quantization/README.md
+<br>qat: https://github.com/pytorch/ao/tree/main/torchao/quantization/qat
 
 Blogs:
 https://selek.tech/posts/static-vs-dynamic-quantization-in-machine-learning/
