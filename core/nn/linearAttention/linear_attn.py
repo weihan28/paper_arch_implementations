@@ -23,7 +23,7 @@ class LinearAttention(nn.Module):
         self.WK = nn.Linear(self.dim, self.n_heads * self.qk_dim, bias=False)
         self.WV = nn.Linear(self.dim, self.n_heads * self.v_dim, bias=False)
 
-        self.proj = nn.Linear(self.v_dim, self.dim, bias=False)
+        self.proj = nn.Linear(self.n_heads * self.v_dim, self.dim, bias=False)
 
     def forward(self, x, start_pos) -> torch.Tensor:
         B, T, _ = x.shape
@@ -85,7 +85,7 @@ class MaskedLinearAttention(LinearAttention):
         kv_sum = torch.einsum("bthd, bthm -> bthdm", k, v).cumsum(dim=1)  # kv = Σ_t (KtVt)
         kv_sum = self.retrieve_cached_kv_sum(B, T, kv_sum, start_pos)
         y = torch.einsum("bthd, bthdm, bth -> bthm", q, kv_sum, z)  # (q @ kv) * z = [bthm]
-        return self.proj(y)  # [btho]
+        return self.proj(y.view(B, T, -1))  # [btd]
 
     def retrieve_cached_kv_sum(self, B, T, kv_sum, start_pos):
         if not self.training:
@@ -125,12 +125,14 @@ if __name__ == "__main__":
     x = torch.randn(b, t, args.dim)
     out = attn(x, start_pos)
     print(out.shape)
+    assert out.shape == x.shape
     start_pos += t
 
     b, t = 2, 2
     x = torch.randn(b, t, args.dim)
     out = attn(x, start_pos)
     print(out.shape)
+    assert out.shape == x.shape
 
 
 
