@@ -88,14 +88,14 @@ class MaskedLinearAttention(LinearAttention):
         return self.proj(y)  # [btho]
 
     def retrieve_cached_kv_sum(self, B, T, kv_sum, start_pos):
-        if not self.training and start_pos > 0:
+        if not self.training:
             # write cache
-            kv_sum = self.cache_kv_sum[:B, 0] + kv_sum
+            kv_sum = self.cache_kv_sum[:B, -1:] + kv_sum
             self.cache_kv_sum[:B, start_pos:start_pos + T] = kv_sum[:, -1:] # [B, 1, H, D]
         return kv_sum
 
     def retrieve_cached_k_sum(self, B, T, k_sum, start_pos):
-        if not self.training and start_pos > 0:
+        if not self.training:
             # write cache
             k_sum = self.cache_k_sum[:B, -1:] + k_sum  # [B, 1, H, D] + [B, T, H, D] = [B, T, H, D]
             self.cache_k_sum[:B, start_pos:start_pos + T] = k_sum[:, -1:] # [B, 1, H, D]
