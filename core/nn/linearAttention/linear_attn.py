@@ -17,6 +17,7 @@ class LinearAttention(nn.Module):
         self.n_heads = args.attn.n_heads
         self.qk_dim = args.attn.qk_dim
         self.v_dim = args.attn.v_dim
+        self.feature_map = args.attn.feature_map
 
         self.WQ = nn.Linear(self.dim, self.n_heads * self.qk_dim, bias=False)
         self.WK = nn.Linear(self.dim, self.n_heads * self.qk_dim, bias=False)
@@ -30,7 +31,7 @@ class LinearAttention(nn.Module):
         q = self.WQ(x).view(B, T, self.n_heads, self.qk_dim)  # [B, T, H, D]
         k = self.WK(x).view(B, T, self.n_heads, self.qk_dim)  # [B, T, H, D]
         v = self.WV(x).view(B, T, self.n_heads, self.v_dim)  # [B, T, H, M]
-        q, k = elu_feature_map(q), elu_feature_map(k)
+        q, k = self.feature_map(q), self.feature_map(k)
 
         kv = torch.einsum("bthd, bthm -> bhdm", k, v)  # K^T @ V
         z = 1 / torch.einsum("bthd, bhd -> bth", q, k.sum(1))  # Σ_d q_t @ (K1+K2..KT)^T = Σ_d (q_t @ Σ_T (Ki^T))
@@ -70,21 +71,21 @@ class MaskedLinearAttention(LinearAttention):
     def forward(self, x, start_pos) -> torch.Tensor:
         assert x.ndim == 3, "x must have 3 dimensions, [B,T,D]"
         B, T, _ = x.shape
-        q = self.WQ(x).view(B, T, self.n_heads, self.qk_dim)  # [B, T, H, D]
-        k = self.WK(x).view(B, T, self.n_heads, self.qk_dim)  # [B, T, H, D]
-        v = self.WV(x).view(B, T, self.n_heads, self.v_dim)  # [B, T, H, M]
-        q, k = elu_feature_map(q), elu_feature_map(k)
+        q = self.WQ(x).view(B, T, self.n_heads, self.qk_dim)
+        k = self.WK(x).view(B, T, self.n_heads, self.qk_dim)
+        v = self.WV(x).view(B, T, self.n_heads, self.v_dim)
+        q, k = self.feature_map(q), self.feature_map(k)
 
         # denominator: q_t @ (K1 + K2..Kt)
-        k_sum = k.cumsum(dim=1)  # [B, T, H, D], Σ_t (Ki^T)
-        k_sum = self.retrieve_cached_k_sum(B, T, k_sum, start_pos) # Σ_1->t (Ki^T) + Σ_t->T (Ki^T) = K_sum[t] + K_sum[t+1]
+        k_sum = k.cumsum(dim=1)  # Σ_t (Ki^T)
+        k_sum = self.retrieve_cached_k_sum(B, T, k_sum, start_pos) # Σ_1->t (Ki^T) + Σ_t->T (Ki^T)
         z = 1 / torch.einsum("bthd, bthd -> bth", q, k_sum)  # Σ_d (q_t @ Σ_T (Ki^T))
 
-        # numerator: q @ Σ_t (KtVt)
+        # numerator: q @ Σ_t(KtVt)
         kv_sum = torch.einsum("bthd, bthm -> bthdm", k, v).cumsum(dim=1)  # kv = Σ_t (KtVt)
         kv_sum = self.retrieve_cached_kv_sum(B, T, kv_sum, start_pos)
-        y = torch.einsum("bthd, bthdm, bth -> bthm", q, kv_sum, z)  # (q @ kv) * bth = bthm
-        return self.proj(y)  # bthm @ mo = btho
+        y = torch.einsum("bthd, bthdm, bth -> bthm", q, kv_sum, z)  # (q @ kv) * z = [bthm]
+        return self.proj(y)  # [btho]
 
     def retrieve_cached_kv_sum(self, B, T, kv_sum, start_pos):
         if not self.training and start_pos > 0:
@@ -104,6 +105,8 @@ class MaskedLinearAttention(LinearAttention):
 if __name__ == "__main__":
     from types import SimpleNamespace
 
+    elu_feature_map = lambda x: F.elu(x) + 1
+
     args = SimpleNamespace(
         max_batch_size=10,
         max_seq_length=200,
@@ -111,7 +114,8 @@ if __name__ == "__main__":
         attn=SimpleNamespace(
             n_heads=8,
             qk_dim=64,
-            v_dim=64
+            v_dim=64,
+            feature_map= elu_feature_map,
         )
     )
 
