@@ -82,7 +82,7 @@ class MaskedLinearAttention(LinearAttention):
         z = 1 / torch.einsum("bthd, bthd -> bth", q, k_sum)  # Σ_d (q_t @ Σ_T (Ki^T))
 
         # numerator: q @ Σ_t(KtVt)
-        kv_sum = torch.einsum("bthd, bthm -> bthdm", k, v).cumsum(dim=1)  # kv = Σ_t (KtVt)
+        kv_sum = torch.einsum("bthd, bthm -> bthdm", k, v).cumsum(dim=1)  # kv = Σ_1->t (Kt ⨂ Vt)
         kv_sum = self.retrieve_cached_kv_sum(B, T, kv_sum, start_pos)
         y = torch.einsum("bthd, bthdm, bth -> bthm", q, kv_sum, z)  # (q @ kv) * z = [bthm]
         return self.proj(y.view(B, T, -1))  # [btd]
