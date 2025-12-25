@@ -1,139 +1,123 @@
-from typing import override
+from typing import Callable
+from abc import ABC, abstractmethod
 
 import torch
 from torch import nn
 from torch.nn import functional as F
 
+K_SUM = "K_SUM"
+KV_SUM = "KV_SUM"
 
-def elu_feature_map(x: torch.Tensor) -> torch.Tensor:
-    return F.elu(x) + 1
 
+class LinearAttentionLayer(nn.Module, ABC):
 
-class LinearAttention(nn.Module):
-
-    def __init__(self, args):
+    def __init__(self, feature_map: Callable):
         super().__init__()
-        self.dim = args.dim
-        self.n_heads = args.attn.n_heads
-        self.qk_dim = args.attn.qk_dim
-        self.v_dim = args.attn.v_dim
-        self.feature_map = args.attn.feature_map
+        self.feature_map = feature_map
 
-        self.WQ = nn.Linear(self.dim, self.n_heads * self.qk_dim, bias=False)
-        self.WK = nn.Linear(self.dim, self.n_heads * self.qk_dim, bias=False)
-        self.WV = nn.Linear(self.dim, self.n_heads * self.v_dim, bias=False)
+        self.register_buffer(K_SUM, None, persistent=False)
+        self.register_buffer(KV_SUM, None, persistent=False)
 
-        self.proj = nn.Linear(self.n_heads * self.v_dim, self.dim, bias=False)
+    def _get_cache(self, name: str):
+        cached = getattr(self, name)
+        if self.training or cached is None:
+            return 0
+        return cached
 
-    def forward(self, x, start_pos) -> torch.Tensor:
-        B, T, _ = x.shape
-        # Q @ K^T @ V = [.., T, D] @ [.., D, T] @ [.., T, M]
-        q = self.WQ(x).view(B, T, self.n_heads, self.qk_dim)  # [B, T, H, D]
-        k = self.WK(x).view(B, T, self.n_heads, self.qk_dim)  # [B, T, H, D]
-        v = self.WV(x).view(B, T, self.n_heads, self.v_dim)  # [B, T, H, M]
+    def _set_cache(self, name, value):
+        if not self.training:
+            setattr(self, name, value)
+
+    def reset_cache(self) -> None:
+        setattr(self, K_SUM, None)
+        setattr(self, KV_SUM, None)
+
+    @abstractmethod
+    def forward(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+        pass
+
+
+class LinearAttention(LinearAttentionLayer):
+
+    def forward(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+        """ Perform Linear Attention over a batch of queries and keys.
+
+        Note:
+        - Let Sk be the start position of the first token from the keys within the target sequence.
+        - Let Tk be the end position of the last token from the keys within the target sequence.
+        - For self-attention, the source sequence is the target sequence.
+
+        Each q_i attends to all keys, namely k_0, k_1 ... k_Tk.
+
+        # cached k_sum with shape [b, h, d, m]
+        # cached kv_sum with shape [b, h, d, m]
+
+        :param q: Query vector of shape [B, tq, H, D]
+        :param k: Key vector of shape [B, tk, H, D]
+        :param v: Value vector of shape [B, tk, H, M]
+        :return: output vector of shape [B, tq, H, M]
+        """
         q, k = self.feature_map(q), self.feature_map(k)
 
-        kv = torch.einsum("bthd, bthm -> bhdm", k, v)  # K^T @ V
-        z = 1 / torch.einsum("bthd, bhd -> bth", q, k.sum(1))  # Σ_d q_t @ (K1+K2..KT)^T = Σ_d (q_t @ Σ_T (Ki^T))
-        o = torch.einsum("bthd, bhdm, bth-> bthm", q, kv, z)  # Σ_d (Q_bthd KV_bhdm Z_bth)
-        return self.proj(o)  # [B, T, H, e]
+        # denominator: q_i @ Σ_{j=0..Tk}(k_j)
+        k_sum = k.sum(dim=1)  # [b,h,d]: Σ_{j=Sk..Tk} (k_j)
+        k_sum += self._get_cache(K_SUM)  # Σ_{j=0..Sk} k_j + Σ_{j=Sk..Tk} k_j
+        self._set_cache(K_SUM, k_sum)
+        z = 1 / torch.einsum("bthd, bhd -> bth", q, k_sum)
+
+        # numerator: q_i @ Σ_{j=0..Tk}(k_j v_j)
+        kv_sum = torch.einsum("bthd, bthm -> bhdm", k, v)  # K.T @ V = Σ_{j=Sk..Tk} (Kj ⨂ Vj)
+        kv_sum += self._get_cache(KV_SUM)  # Σ_{j=0..Sk} (Kj ⨂ Vj) + Σ_{j=Sk..Tk} (Kj ⨂ Vj)
+        self._set_cache(KV_SUM, kv_sum)
+        return torch.einsum("bthd, bhdm, bth-> bthm", q, kv_sum, z)
 
 
-class MaskedLinearAttention(LinearAttention):
-    def __init__(self, args):
-        super().__init__(args)
-        self.max_batch_size = args.max_batch_size
-        self.max_seq_length = args.max_seq_length
+class CausalLinearSelfAttention(LinearAttentionLayer):
 
-        # denominator cache
-        self.register_buffer(
-            "cache_k_sum",
-            torch.zeros(
-                self.max_batch_size,
-                1,
-                self.n_heads,
-                self.qk_dim)
-        )
+    def forward(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+        """ Perform Causal Linear Attention over a batch of queries and keys.
 
-        # numerator cache
-        self.register_buffer(
-            "cache_kv_sum",
-            torch.zeros(
-                self.max_batch_size,
-                1,
-                self.n_heads,
-                self.qk_dim,
-                self.v_dim)
-        )
+        Each q_i attends to all keys, namely k_0, k_1 ... k_i.
 
+        # cached k_sum with shape [b, 1, h, d, m] for easy addition
+        # cached kv_sum with shape [b, 1, h, d, m] for easy addition
 
-    @eval
-    @override
-    def forward(self, x, start_pos) -> torch.Tensor:
-        assert x.ndim == 3, "x must have 3 dimensions, [B,T,D]"
-        B, T, _ = x.shape
-        q = self.WQ(x).view(B, T, self.n_heads, self.qk_dim)
-        k = self.WK(x).view(B, T, self.n_heads, self.qk_dim)
-        v = self.WV(x).view(B, T, self.n_heads, self.v_dim)
+        :param q: Query vector of shape [B, Tq, H, D]
+        :param k: Key vector of shape [B, Tq, H, D]
+        :param v: Value vector of shape [B, Tq, H, M]
+        :return: output vector of shape [B, Tq, H, M]
+        """
         q, k = self.feature_map(q), self.feature_map(k)
 
-        # denominator: q_t @ (K1 + K2..Kt)
-        k_sum = k.cumsum(dim=1)  # Σ_t (Ki^T)
-        k_sum = self.retrieve_cached_k_sum(B, T, k_sum, start_pos) # Σ_1->t (Ki^T) + Σ_t->T (Ki^T)
-        z = 1 / torch.einsum("bthd, bthd -> bth", q, k_sum)  # Σ_d (q_t @ Σ_T (Ki^T))
+        # denominator: q_i @ Σ_{t=0..i}(k_t)
+        k_sum = k.cumsum(dim=1)  # Σ_{j=Sk..i} (k_j)
+        k_sum += self._get_cache(K_SUM)  # Σ_{j=0..Sk} k_j + Σ_{j=Sk..i} k_j
+        self._set_cache(K_SUM, k_sum[:, -1:])
+        z = 1 / torch.einsum("bthd, bthd -> bth", q, k_sum)
 
-        # numerator: q @ Σ_t(KtVt)
-        kv_sum = torch.einsum("bthd, bthm -> bthdm", k, v).cumsum(dim=1)  # kv = Σ_1->t (Kt ⨂ Vt)
-        kv_sum = self.retrieve_cached_kv_sum(B, T, kv_sum, start_pos)
-        y = torch.einsum("bthd, bthdm, bth -> bthm", q, kv_sum, z)  # (q @ kv) * z = [bthm]
-        return self.proj(y.view(B, T, -1))  # [btd]
-
-    def retrieve_cached_kv_sum(self, B, T, kv_sum, start_pos):
-        if not self.training:
-            # write cache
-            kv_sum = self.cache_kv_sum[:B, -1:] + kv_sum
-            self.cache_kv_sum[:B, start_pos:start_pos + T] = kv_sum[:, -1:] # [B, 1, H, D]
-        return kv_sum
-
-    def retrieve_cached_k_sum(self, B, T, k_sum, start_pos):
-        if not self.training:
-            # write cache
-            k_sum = self.cache_k_sum[:B, -1:] + k_sum  # [B, 1, H, D] + [B, T, H, D] = [B, T, H, D]
-            self.cache_k_sum[:B, start_pos:start_pos + T] = k_sum[:, -1:] # [B, 1, H, D]
-        return k_sum
+        # numerator: q_i @ Σ_{j=0..i}(k_j v_j)
+        kv_sum = torch.einsum("bthd, bthm -> bthdm", k, v).cumsum(dim=-2)  # K.T @ V = Σ_{j=Sk..i} (Kj ⨂ Vj)
+        kv_sum += self._get_cache(KV_SUM)  # Σ_{j=0..Sk} (Kj ⨂ Vj) + Σ_{j=Sk..i} (Kj ⨂ Vj)
+        self._set_cache(KV_SUM, kv_sum[:, -1:])
+        return torch.einsum("bthd, bthdm, bth-> bthm", q, kv_sum, z)
 
 
 if __name__ == "__main__":
-    from types import SimpleNamespace
+    B, Tq, H, D = 4, 5, 6, 7
+    Tk, M = 9, 10
+    q = torch.randn(B, Tq, H, D)
+    k = torch.randn(B, Tk, H, D)
+    v = torch.randn(B, Tk, H, M)
 
-    elu_feature_map = lambda x: F.elu(x) + 1
+    feature_map = lambda x: F.elu(x) + 1
 
-    args = SimpleNamespace(
-        max_batch_size=10,
-        max_seq_length=200,
-        dim=512,
-        attn=SimpleNamespace(
-            n_heads=8,
-            qk_dim=64,
-            v_dim=64,
-            feature_map= elu_feature_map,
-        )
-    )
+    attn = LinearAttention(feature_map).eval()
+    print(attn(q, k, v).shape)
+    print(attn(q, k, v).shape)
 
-    start_pos = 0
-    attn = MaskedLinearAttention(args).eval()
-    b, t = 2, 3
-    x = torch.randn(b, t, args.dim)
-    out = attn(x, start_pos)
-    print(out.shape)
-    assert out.shape == x.shape
-    start_pos += t
-
-    b, t = 2, 2
-    x = torch.randn(b, t, args.dim)
-    out = attn(x, start_pos)
-    print(out.shape)
-    assert out.shape == x.shape
-
-
-
+    q = torch.randn(B, Tq, H, D)
+    k = torch.randn(B, Tq, H, D)
+    v = torch.randn(B, Tq, H, M)
+    attn = CausalLinearSelfAttention(feature_map).eval()
+    print(attn(q, k, v).shape)
+    print(attn(q, k, v).shape)
