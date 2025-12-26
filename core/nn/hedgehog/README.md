@@ -8,3 +8,4 @@ This exploits the fact that the only difference between linear attention and sta
 the softmax is replaced with function mappings.
 
 <img src="attachments/hedgehog_2.png"></img>
+<img src="attachments/hedgehog_3.png"></img>
