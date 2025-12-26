@@ -9,7 +9,7 @@ CACHE_K_SUM = "CACHE_K_SUM"
 CACHE_KV_SUM = "CACHE_KV_SUM"
 
 
-class LinearAttentionLayer(nn.Module, ABC):
+class LinearAttentionBase(nn.Module, ABC):
 
     def __init__(self, feature_map: Callable):
         super().__init__()
@@ -23,13 +23,13 @@ class LinearAttentionLayer(nn.Module, ABC):
         setattr(self, CACHE_KV_SUM, torch.tensor(0))
 
     @abstractmethod
-    def forward(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+    def forward(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, **kwargs) -> torch.Tensor:
         pass
 
 
-class LinearAttention(LinearAttentionLayer):
+class LinearAttention(LinearAttentionBase):
 
-    def forward(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+    def forward(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, **kwargs) -> torch.Tensor:
         """ Perform Linear Attention over a batch of queries and keys.
 
         Note:
@@ -39,7 +39,7 @@ class LinearAttention(LinearAttentionLayer):
 
         Each q_i attends to all keys, namely k_0, k_1 ... k_Tk.
 
-        # cached k_sum with shape [b, h, d, m]
+        # cached k_sum with shape [b, h, d]
         # cached kv_sum with shape [b, h, d, m]
 
         :param q: Query vector of shape [B, tq, H, D]
@@ -64,15 +64,16 @@ class LinearAttention(LinearAttentionLayer):
         return torch.einsum("bthd, bhdm, bth-> bthm", q, kv_sum, z)
 
 
-class CausalLinearSelfAttention(LinearAttentionLayer):
+class CausalLinearSelfAttention(LinearAttentionBase):
 
-    def forward(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+    def forward(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, **kwargs) -> torch.Tensor:
         """ Perform Causal Linear Attention over a batch of queries and keys.
 
         Each q_i attends to all keys, namely k_0, k_1 ... k_i.
 
-        # cached k_sum with shape [b, 1, h, d, m] for easy addition
-        # cached kv_sum with shape [b, 1, h, d, m] for easy addition
+        # cached k_sum with shape [b, 1, h, d]
+        # cached kv_sum with shape [b, 1, h, d, m]
+        # the extra dimension is or easy addition.
 
         :param q: Query vector of shape [B, Tq, H, D]
         :param k: Key vector of shape [B, Tq, H, D]
