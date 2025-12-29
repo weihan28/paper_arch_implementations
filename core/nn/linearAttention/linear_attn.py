@@ -2,11 +2,19 @@ from typing import Callable
 from abc import ABC, abstractmethod
 
 import torch
-from torch import nn
+from torch import nn, Tensor
 from torch.nn import functional as F
 
 CACHE_K_SUM = "CACHE_K_SUM"
 CACHE_KV_SUM = "CACHE_KV_SUM"
+
+
+# feature maps
+def elu_feature_map(x: Tensor, inplace: bool = False) -> Tensor:
+    return F.elu(x, inplace=inplace) + 1
+
+def relu_feature_map(x: Tensor, inplace: bool = False) -> Tensor:
+    return F.relu(x, inplace=inplace)
 
 
 class LinearAttentionBase(nn.Module, ABC):
@@ -104,15 +112,13 @@ if __name__ == "__main__":
     k = torch.randn(B, Tk, H, D)
     v = torch.randn(B, Tk, H, M)
 
-    feature_map = lambda x: F.elu(x) + 1
-
-    attn = LinearAttention(feature_map).eval()
+    attn = LinearAttention(elu_feature_map).eval()
     print(attn(q, k, v).shape)
     print(attn(q, k, v).shape)
 
     q = torch.randn(B, Tq, H, D)
     k = torch.randn(B, Tq, H, D)
     v = torch.randn(B, Tq, H, M)
-    attn = CausalLinearSelfAttention(feature_map).eval()
+    attn = CausalLinearSelfAttention(elu_feature_map).eval()
     print(attn(q, k, v).shape)
     print(attn(q, k, v).shape)
