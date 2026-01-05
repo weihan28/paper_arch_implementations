@@ -7,8 +7,9 @@ paper:
 # Architecture
 
 - dynamic hyper-connection variant (H is "dynamically" generated and not a pre-learnt weight.)
-  <img src="attachments/mhc2.png" width="700">
-
+<br>
+<img src="attachments/mhc2.png" width="700">
+<br>
 # Problems of HC architecture.
 
 <img src="attachments/mhc3.png" width="700">
@@ -17,6 +18,7 @@ paper:
 
 <img src="attachments/mhc4.png" width="700">
 
+Note: it is not closed under hadamard product.
 # Deepseek mHC hyperparameters
 
 <b>

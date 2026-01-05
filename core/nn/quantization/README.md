@@ -1,4 +1,3 @@
-Source: https://youtu.be/0VdNflU08yA?si=zTiAwwZ3W1YT-ruG
 <br>Official torchao intro: https://docs.pytorch.org/ao/stable/quantization_overview.html#
 
 Github:

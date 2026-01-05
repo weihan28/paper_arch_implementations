@@ -6,9 +6,9 @@ def naive_sinkhorn_knopp(x, n_iters=4):
     # A is of shape [..., row=n, col=n]
     for _ in range(n_iters):
         # row normalization
-        x /= x.sum(axis=-2, keepdims=True, dtype=x.dtype)
+        x = x / x.sum(axis=-2, keepdims=True, dtype=x.dtype)
         # column normalization
-        x /= x.sum(axis=-1, keepdims=True, dtype=x.dtype)
+        x = x / x.sum(axis=-1, keepdims=True, dtype=x.dtype)
     return x
 
 
